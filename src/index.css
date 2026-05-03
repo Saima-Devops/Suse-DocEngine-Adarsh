@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  /* SUSE Brand Colors */
+  --color-suse-pine: #30BA78;
+  --color-suse-jungle: #173238;
+  --color-suse-water: #00A3CC;
+  --color-suse-dark: #0c1c20;
+}
+
+@layer base {
+  body {
+    @apply bg-suse-dark text-gray-100 font-sans antialiased;
+  }
+}
+
+.suse-card {
+  @apply bg-suse-jungle/40 border border-suse-pine/20 rounded-lg backdrop-blur-sm shadow-xl;
+}
+
+.suse-button-primary {
+  @apply bg-suse-pine hover:bg-suse-pine/90 text-white font-semibold py-2 px-4 rounded transition-all active:scale-95 disabled:opacity-50;
+}
+
+.suse-button-outline {
+  @apply border border-suse-pine text-suse-pine hover:bg-suse-pine/10 font-semibold py-2 px-4 rounded transition-all active:scale-95;
+}
+
+.suse-input {
+  @apply bg-suse-dark/50 border border-suse-pine/30 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-suse-pine/50 transition-all;
+}
+
+.glass-panel {
+  background: rgba(23, 50, 56, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(48, 186, 120, 0.1);
+}
