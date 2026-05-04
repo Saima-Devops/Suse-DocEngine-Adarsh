@@ -12,6 +12,10 @@ from bs4 import BeautifulSoup
 app = Flask(__name__)
 CORS(app)
 
+@app.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"})
+
 def simple_html_to_asciidoc(html):
     """
     Programmatic transformation from HTML to AsciiDoc using Regex and BeautifulSoup.

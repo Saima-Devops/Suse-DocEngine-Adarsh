@@ -19,7 +19,15 @@ npm install
 ```
 
 ### 3. Setup Firebase Config
-The application needs the `src/firebase-applet-config.json` file. Ensure it contains your Firebase project credentials. You can get these from the Firebase Console (Project Settings -> General -> Your apps -> SDK setup and configuration).
+The application needs the `firebase-applet-config.json` file in the root. Ensure it contains your Firebase project credentials. You can get these from the Firebase Console (Project Settings -> General -> Your apps -> SDK setup and configuration).
+
+**CRITICAL: Authorized Domains**
+To make Google Login work locally:
+1. Go to [Firebase Console](https://console.firebase.google.com/).
+2. Select your project.
+3. Go to **Authentication** -> **Settings** -> **Authorized Domains**.
+4. Click **Add Domain** and add `localhost` and `127.0.0.1`.
+5. Ensure your browser allows popups and doesn't block 3rd party cookies for Google/Firebase domains.
 
 ### 4. Setup Environment Variables
 Create a `.env` file in the root directory with the following variables:

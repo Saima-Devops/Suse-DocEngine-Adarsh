@@ -1,8 +1,7 @@
 import React from 'react';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, googleProvider, db } from '../lib/firebase';
-import { FileText, Github, ShieldCheck, Zap } from 'lucide-react';
+import { auth, googleProvider } from '../lib/firebase';
+import { FileText, Github, ShieldCheck } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function Login() {
@@ -37,9 +36,9 @@ export default function Login() {
         <div className="flex flex-col items-center text-center mb-10">
           <div className="mb-6">
             <img 
-              src="https://www.suse.com/assets/img/suse-logo.svg" 
+              src="/suse-logo.svg" 
               alt="SUSE Logo" 
-              className="w-20 h-20"
+              className="w-24 h-24 drop-shadow-[0_0_20px_rgba(48,186,120,0.3)]"
               referrerPolicy="no-referrer"
             />
           </div>

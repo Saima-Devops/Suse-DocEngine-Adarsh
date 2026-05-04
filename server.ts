@@ -64,8 +64,54 @@ async function startServer() {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
   // API Routes
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  app.get("/api/health", async (req, res) => {
+    res.json({ 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      pythonBackend: "disabled"
+    });
+  });
+
+  app.get("/api/extractions", (req, res) => {
+    const EXTRACTIONS_ROOT = path.join(DATA_DIR);
+    if (!fs.existsSync(EXTRACTIONS_ROOT)) {
+      return res.json([]);
+    }
+    
+    const getAllFiles = (dirPath: string, arrayOfFiles: string[] = []) => {
+      const files = fs.readdirSync(dirPath);
+      files.forEach((file) => {
+        if (fs.statSync(path.join(dirPath, file)).isDirectory()) {
+          arrayOfFiles = getAllFiles(path.join(dirPath, file), arrayOfFiles);
+        } else if (file.endsWith('.json')) {
+          const relativePath = path.relative(DATA_DIR, path.join(dirPath, file));
+          arrayOfFiles.push(relativePath);
+        }
+      });
+      return arrayOfFiles;
+    };
+
+    const allJsonFiles = getAllFiles(EXTRACTIONS_ROOT);
+    res.json(allJsonFiles);
+  });
+
+  app.get("/api/extractions-content", (req, res) => {
+    const relativePath = req.query.path as string;
+    if (!relativePath) return res.status(400).json({ error: "Missing path" });
+    
+    // Security check: ensure path is within DATA_DIR
+    const filePath = path.join(DATA_DIR, relativePath);
+    const resolvedPath = path.resolve(filePath);
+    if (!resolvedPath.startsWith(path.resolve(DATA_DIR))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "File not found" });
+    }
+    
+    const content = fs.readFileSync(filePath, "utf-8");
+    res.json(JSON.parse(content));
   });
 
   app.get("/api/jobs", (req, res) => {
@@ -131,10 +177,31 @@ async function startServer() {
       if (!req.file) return res.status(400).json({ error: "Missing file" });
 
       try {
-        console.log("Using JS mammoth extraction...");
+        const saveExtractedLocally = (data: any, originalName: string, subfolder?: string, customName?: string) => {
+          const folder = subfolder || "extractions";
+          const EXTRACTIONS_DIR = path.join(DATA_DIR, folder);
+          if (!fs.existsSync(EXTRACTIONS_DIR)) {
+            fs.mkdirSync(EXTRACTIONS_DIR, { recursive: true });
+          }
+          const timestamp = Date.now();
+          let finalName = "";
+          if (customName) {
+            finalName = customName.toLowerCase().endsWith('.json') ? customName : `${customName}.json`;
+            finalName = finalName.replace(/[^a-z0-9._\-]/gi, '_');
+          } else {
+            const safeName = originalName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            finalName = `${safeName}-${timestamp}.json`;
+          }
+          
+          const extractionPath = path.join(EXTRACTIONS_DIR, finalName);
+          fs.writeFileSync(extractionPath, JSON.stringify(data, null, 2));
+          console.log(`Saved structured extraction to ${extractionPath}`);
+          return path.join(folder, finalName); // Return relative path
+        };
+
+        console.log("Using JS mammoth extraction (Python unavailable in this environment)...");
         const mammoth = await import("mammoth");
         const cheerio = await import("cheerio");
-        // mammoth doesn't have default export like some packages.
         const mammothLib = (mammoth as any).default || mammoth;
         
         const result = await mammothLib.convertToHtml({ buffer: req.file.buffer });
@@ -144,7 +211,7 @@ async function startServer() {
         const elements: any[] = [];
         
         $('body').children().each((i, el) => {
-          const tagName = el.tagName.toLowerCase();
+          const tagName = (el as any).tagName.toLowerCase();
           const text = $(el).text().trim();
           
           if (!text) return;
@@ -159,24 +226,28 @@ async function startServer() {
               const liText = $(li).text().trim();
               if (liText) elements.push({ type: "bullet", content: liText });
             });
-            return; // skip pushing the entire list as one block
+            return;
           }
           
           elements.push({ type, content: text });
         });
         
-        res.json({
+        const extractedData = {
             title: req.file.originalname.replace(".docx", ""),
             elements: elements
+        };
+        
+        const subfolder = req.body.subfolder;
+        const customFilename = req.body.customFilename;
+        const localPath = saveExtractedLocally(extractedData, req.file.originalname, subfolder, customFilename);
+
+        res.json({
+            ...extractedData,
+            localPath
         });
       } catch (error: any) {
-        console.error("Local JS Fallback Error:", error.message);
-        res
-          .status(500)
-          .json({
-            error:
-              "Failed to extract document natively. Python backend is also unavailable.",
-          });
+        console.error("Extraction Error:", error.message);
+        res.status(500).json({ error: "Extraction failed." });
       }
     },
   );

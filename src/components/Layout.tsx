@@ -55,7 +55,7 @@ export const Layout: React.FC = () => {
             <div className="flex items-center gap-3 overflow-hidden">
               <div className="p-1.5 bg-white/5 rounded-xl border border-white/10 shadow-inner group-hover:border-suse-pine/30 transition-colors">
                 <img 
-                  src="https://www.suse.com/assets/img/suse-logo.svg" 
+                  src="/suse-logo.svg" 
                   alt="SUSE Logo" 
                   className="w-8 h-8 flex-shrink-0 drop-shadow-[0_0_8px_rgba(12,186,114,0.2)]"
                   referrerPolicy="no-referrer"
