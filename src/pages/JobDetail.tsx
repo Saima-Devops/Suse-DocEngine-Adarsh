@@ -80,7 +80,8 @@ export default function JobDetail() {
       const response = await axios.post('/api/transform', {
         docId,
         accessToken,
-        manualContent: directContent || job?.manualContent || null
+        manualContent: directContent || job?.manualContent || null,
+        metadata: job?.metadata
       });
 
       const updatedJob = await axios.patch(`/api/jobs/${jobId}`, {

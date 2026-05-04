@@ -51,12 +51,14 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(cors());
   app.use(cookieParser());
-  
+
   // Security headers with adjustment for iframe preview
-  app.use(helmet({
-    contentSecurityPolicy: false, 
-    crossOriginEmbedderPolicy: false
-  }));
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
 
   // AI Service
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
@@ -89,7 +91,7 @@ async function startServer() {
       id: "job-" + Date.now().toString(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      status: "pending"
+      status: "pending",
     };
     jobs.push(newJob);
     saveLocalJobs(jobs);
@@ -100,11 +102,11 @@ async function startServer() {
     const jobs = getLocalJobs();
     const idx = jobs.findIndex((j: any) => j.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: "Job not found" });
-    
-    jobs[idx] = { 
-      ...jobs[idx], 
-      ...req.body, 
-      updatedAt: new Date().toISOString() 
+
+    jobs[idx] = {
+      ...jobs[idx],
+      ...req.body,
+      updatedAt: new Date().toISOString(),
     };
     saveLocalJobs(jobs);
     res.json(jobs[idx]);
@@ -114,38 +116,74 @@ async function startServer() {
     let jobs = getLocalJobs();
     const exists = jobs.some((j: any) => j.id === req.params.id);
     if (!exists) return res.status(404).json({ error: "Job not found" });
-    
+
     jobs = jobs.filter((j: any) => j.id !== req.params.id);
     saveLocalJobs(jobs);
     res.json({ success: true });
   });
 
-  app.post("/api/extract-structured", upload.single("file"), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: "Missing file" });
-    
-    try {
-      const formData = new FormData();
-      const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
-      formData.append("file", blob, req.file.originalname);
-
-      // Call the Python backend (assuming it's running locally on port 5000)
-      const response = await axios.post("http://localhost:5000/api/extract-structured", formData, {
-        headers: { "Content-Type": "multipart/form-data" }
-      });
-      
-      res.json(response.data);
-    } catch (error: any) {
-      console.error("Python Extraction Proxy Error:", error.message);
-      // If Python backend fails, we return a basic extraction
-      res.status(500).json({ error: "Failed to connect to Python extraction service. Make sure it is running on port 5000." });
-    }
-  });
-
   const upload = multer({ storage: multer.memoryStorage() });
+
+  app.post(
+    "/api/extract-structured",
+    upload.single("file"),
+    async (req, res) => {
+      if (!req.file) return res.status(400).json({ error: "Missing file" });
+
+      try {
+        console.log("Using JS mammoth extraction...");
+        const mammoth = await import("mammoth");
+        const cheerio = await import("cheerio");
+        // mammoth doesn't have default export like some packages.
+        const mammothLib = (mammoth as any).default || mammoth;
+        
+        const result = await mammothLib.convertToHtml({ buffer: req.file.buffer });
+        const html = result.value;
+        const $ = cheerio.load(html);
+        
+        const elements: any[] = [];
+        
+        $('body').children().each((i, el) => {
+          const tagName = el.tagName.toLowerCase();
+          const text = $(el).text().trim();
+          
+          if (!text) return;
+          
+          let type = "paragraph";
+          if (tagName === "h1") type = "h1";
+          else if (tagName === "h2") type = "h2";
+          else if (tagName === "h3") type = "h3";
+          else if (tagName === "h4" || tagName === "h5" || tagName === "h6") type = "h4";
+          else if (tagName === "ul" || tagName === "ol") {
+            $(el).find('li').each((_, li) => {
+              const liText = $(li).text().trim();
+              if (liText) elements.push({ type: "bullet", content: liText });
+            });
+            return; // skip pushing the entire list as one block
+          }
+          
+          elements.push({ type, content: text });
+        });
+        
+        res.json({
+            title: req.file.originalname.replace(".docx", ""),
+            elements: elements
+        });
+      } catch (error: any) {
+        console.error("Local JS Fallback Error:", error.message);
+        res
+          .status(500)
+          .json({
+            error:
+              "Failed to extract document natively. Python backend is also unavailable.",
+          });
+      }
+    },
+  );
 
   function simpleHtmlToAsciiDoc(html: string): string {
     if (!html) return "";
-    
+
     let adoc = html;
 
     // Headings
@@ -167,7 +205,10 @@ async function startServer() {
     adoc = adoc.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, "\n$1\n");
 
     // Links
-    adoc = adoc.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, "link:$1[$2]");
+    adoc = adoc.replace(
+      /<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
+      "link:$1[$2]",
+    );
 
     // Br
     adoc = adoc.replace(/<br\s*\/?>/gi, " +\n");
@@ -183,28 +224,33 @@ async function startServer() {
 
     // Trim whitespace
     adoc = adoc.replace(/\n\s*\n\s*\n/g, "\n\n");
-    
+
     return adoc.trim();
   }
-  
+
   app.post("/api/upload", upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Missing file" });
 
     try {
-      console.log(`Processing local upload: ${req.file.originalname}, size: ${req.file.size}, mime: ${req.file.mimetype}`);
-      
+      console.log(
+        `Processing local upload: ${req.file.originalname}, size: ${req.file.size}, mime: ${req.file.mimetype}`,
+      );
+
       let content = "";
       const mimeType = req.file.mimetype;
-      
+
       const mammoth = await import("mammoth");
       const mammothLib = mammoth.default || mammoth;
 
       if (
-        mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
+        mimeType ===
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
         req.file.originalname.endsWith(".docx")
       ) {
         // Use HTML for better formatting preservation during conversion
-        const result = await mammothLib.convertToHtml({ buffer: req.file.buffer });
+        const result = await mammothLib.convertToHtml({
+          buffer: req.file.buffer,
+        });
         content = result.value; // This is HTML
       } else {
         // Fallback for text files
@@ -214,71 +260,110 @@ async function startServer() {
       const docId = "local-" + Date.now();
       console.log("Local extraction success, docId:", docId);
 
-      res.json({ 
-        docId, 
-        title: req.file.originalname, 
-        content: content 
+      res.json({
+        docId,
+        title: req.file.originalname,
+        content: content,
       });
     } catch (error: any) {
       console.error("Upload Error Detailed:", error);
-      res.status(500).json({ error: error.message || "Internal Server Error during upload" });
+      res
+        .status(500)
+        .json({
+          error: error.message || "Internal Server Error during upload",
+        });
     }
   });
 
   // --- Pipeline Endpoints ---
 
   app.post("/api/transform", async (req, res) => {
-    const { docId, accessToken, manualContent } = req.body;
-    
+    const { docId, accessToken, manualContent, metadata } = req.body;
+
     try {
       let contentToTransform = manualContent;
       let title = "Document";
 
-      if (!contentToTransform) {
-        if (accessToken && accessToken !== "undefined" && accessToken !== "null" && docId && !docId.startsWith("local-")) {
-          // If we have a Google Doc ID and Token, try to get HTML export (better for programmatic conversion)
-          try {
-            const exportUrl = `https://www.googleapis.com/drive/v3/files/${docId}/export?mimeType=text/html`;
-            const response = await axios.get(exportUrl, {
-              headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            contentToTransform = response.data;
-          } catch (e) {
-            // Fallback to docs API if export fails
-            const auth = new google.auth.OAuth2();
-            auth.setCredentials({ access_token: accessToken });
-            const docs = google.docs({ version: "v1", auth });
-            const response = await docs.documents.get({ documentId: docId });
-            contentToTransform = `<h1>${response.data.title}</h1>\n` + JSON.stringify(response.data.body);
-            title = response.data.title || title;
-          }
-        } else if (docId && !docId.startsWith("local-")) {
-          // Attempt to fetch public export if no token and not local
-          try {
-            const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=html`;
-            const response = await axios.get(exportUrl);
-            contentToTransform = response.data;
-          } catch (e) {
-            throw new Error("Unable to fetch document. It might be private. Please log in with Google.");
-          }
-        }
-      }
-
-      if (!contentToTransform) {
-        throw new Error("No content available to transform. Please provide a valid document.");
-      }
-
       // NON-AI LOGIC: Programmatic transformation
       let adoc = "";
-      if (contentToTransform.includes("<") && contentToTransform.includes(">")) {
-        // It's likely HTML
-        adoc = simpleHtmlToAsciiDoc(contentToTransform);
+
+      // If we have strict structured metadata from the UI!
+      if (metadata && Array.isArray(metadata)) {
+        console.log("Using structured metadata for AsciiDoc conversion...");
+        const blocks = metadata.map(el => {
+          if (el.type === 'h1') return `= ${el.content}`;
+          if (el.type === 'h2') return `== ${el.content}`;
+          if (el.type === 'h3') return `=== ${el.content}`;
+          if (el.type === 'h4') return `==== ${el.content}`;
+          if (el.type === 'bullet') return `* ${el.content}`;
+          return el.content;
+        });
+        adoc = blocks.filter(Boolean).join('\n\n');
+        // Extract title from the first h1 if it exists
+        const firstH1 = metadata.find(m => m.type === 'h1');
+        if (firstH1) {
+          title = firstH1.content;
+        }
       } else {
-        // It's likely plain text
-        adoc = contentToTransform;
-        // Basic wrapping
-        if (!adoc.startsWith("=")) {
-          adoc = `= ${title}\n\n${adoc}`;
+        if (!contentToTransform) {
+          if (
+            accessToken &&
+            accessToken !== "undefined" &&
+            accessToken !== "null" &&
+            docId &&
+            !docId.startsWith("local-")
+          ) {
+            // If we have a Google Doc ID and Token, try to get HTML export (better for programmatic conversion)
+            try {
+              const exportUrl = `https://www.googleapis.com/drive/v3/files/${docId}/export?mimeType=text/html`;
+              const response = await axios.get(exportUrl, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+              });
+              contentToTransform = response.data;
+            } catch (e) {
+              // Fallback to docs API if export fails
+              const auth = new google.auth.OAuth2();
+              auth.setCredentials({ access_token: accessToken });
+              const docs = google.docs({ version: "v1", auth });
+              const response = await docs.documents.get({ documentId: docId });
+              contentToTransform =
+                `<h1>${response.data.title}</h1>\n` +
+                JSON.stringify(response.data.body);
+              title = response.data.title || title;
+            }
+          } else if (docId && !docId.startsWith("local-")) {
+            // Attempt to fetch public export if no token and not local
+            try {
+              const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=html`;
+              const response = await axios.get(exportUrl);
+              contentToTransform = response.data;
+            } catch (e) {
+              throw new Error(
+                "Unable to fetch document. It might be private. Please log in with Google.",
+              );
+            }
+          }
+        }
+
+        if (!contentToTransform) {
+          throw new Error(
+            "No content available to transform. Please provide a valid document.",
+          );
+        }
+
+        if (
+          contentToTransform.includes("<") &&
+          contentToTransform.includes(">")
+        ) {
+          // It's likely HTML
+          adoc = simpleHtmlToAsciiDoc(contentToTransform);
+        } else {
+          // It's likely plain text
+          adoc = contentToTransform;
+          // Basic wrapping
+          if (!adoc.startsWith("=")) {
+            adoc = `= ${title}\n\n${adoc}`;
+          }
         }
       }
 
@@ -290,8 +375,15 @@ async function startServer() {
   });
 
   app.post("/api/sync", async (req, res) => {
-    const { githubToken, repo, branch, path: filePath, content, message } = req.body;
-    
+    const {
+      githubToken,
+      repo,
+      branch,
+      path: filePath,
+      content,
+      message,
+    } = req.body;
+
     try {
       const octokit = new Octokit({ auth: githubToken });
       const [owner, repoName] = repo.split("/");
@@ -303,7 +395,7 @@ async function startServer() {
           owner,
           repo: repoName,
           path: filePath,
-          ref: branch
+          ref: branch,
         });
         if (!Array.isArray(data)) sha = data.sha;
       } catch (e) {
@@ -317,7 +409,7 @@ async function startServer() {
         message: message || "docs: update from SUSE DocEngine",
         content: Buffer.from(content).toString("base64"),
         branch,
-        sha
+        sha,
       });
 
       res.json({ success: true, url: syncResult.data.commit.html_url });
