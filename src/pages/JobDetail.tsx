@@ -61,7 +61,7 @@ export default function JobDetail() {
       
       // Auto-run transformation if pending
       if (data.status === 'pending' && !processing) {
-        startTransformation(data.id, data.googleDocId, data.manualContent);
+        startTransformation(data);
       }
 
       // Fetch extraction data if path exists
@@ -126,23 +126,23 @@ export default function JobDetail() {
     }
   }, [previewContent]);
 
-  const startTransformation = async (jobId: string, docId: string, directContent?: string) => {
+  const startTransformation = async (currentJob: any) => {
     setProcessing(true);
     try {
       // Update local status to processing
-      await axios.patch(`/api/jobs/${jobId}`, { status: 'processing' });
+      await axios.patch(`/api/jobs/${currentJob.id}`, { status: 'processing' });
 
       // Get token from localStorage
       const accessToken = localStorage.getItem('google_token');
       
       const response = await axios.post('/api/transform', {
-        docId,
+        docId: currentJob.googleDocId,
         accessToken,
-        manualContent: directContent || job?.manualContent || null,
-        metadata: job?.metadata
+        manualContent: currentJob.manualContent || null,
+        metadata: currentJob.metadata
       });
 
-      const updatedJob = await axios.patch(`/api/jobs/${jobId}`, {
+      const updatedJob = await axios.patch(`/api/jobs/${currentJob.id}`, {
         asciiDocContent: response.data.adoc,
         googleDocTitle: response.data.title,
         status: 'completed'
@@ -155,7 +155,7 @@ export default function JobDetail() {
     } catch (error: any) {
       console.error(error);
       const errorMessage = error.response?.data?.error || error.message;
-      await axios.patch(`/api/jobs/${jobId}`, { status: 'failed', error: errorMessage });
+      await axios.patch(`/api/jobs/${currentJob.id}`, { status: 'failed', error: errorMessage });
       fetchJob(); // Refresh state
     } finally {
       setProcessing(false);
@@ -253,28 +253,28 @@ export default function JobDetail() {
               document.body.removeChild(a);
             }}
             disabled={!extractionData}
-            className="p-2.5 rounded-xl text-gray-400 hover:text-suse-pine hover:bg-suse-pine/10 border border-transparent hover:border-suse-pine/20 transition-all group"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-gray-300 hover:text-suse-pine hover:bg-suse-pine/10 border border-transparent hover:border-suse-pine/20 transition-all font-bold text-xs uppercase tracking-wider"
             title="Download Metadata JSON"
           >
-            <FileCode size={18} className="group-hover:scale-110 transition-transform" />
+            <FileCode size={16} /> JSON
           </button>
 
           <button 
             onClick={handleDownload}
             disabled={!previewContent}
-            className="p-2.5 rounded-xl text-gray-400 hover:text-suse-water hover:bg-suse-water/10 border border-transparent hover:border-suse-water/20 transition-all group"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-gray-300 hover:text-suse-water hover:bg-suse-water/10 border border-transparent hover:border-suse-water/20 transition-all font-bold text-xs uppercase tracking-wider"
             title="Export ASCII"
           >
-            <Download size={18} className="group-hover:scale-110 transition-transform" />
+            <Download size={16} /> ASCII
           </button>
           
           <button 
-            onClick={() => startTransformation(job.id, job.googleDocId, job.manualContent)}
+            onClick={() => startTransformation(job)}
             disabled={processing}
-            className="p-2.5 rounded-xl text-gray-400 hover:text-suse-pine hover:bg-suse-pine/10 border border-transparent hover:border-suse-pine/20 transition-all group"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-gray-300 hover:text-suse-pine hover:bg-suse-pine/10 border border-transparent hover:border-suse-pine/20 transition-all font-bold text-xs uppercase tracking-wider"
             title="Re-run Transformation"
           >
-            <RefreshCw size={18} className={clsx("group-hover:scale-110 transition-transform", processing && "animate-spin")} />
+            <RefreshCw size={16} className={clsx(processing && "animate-spin")} /> Re-run
           </button>
 
           <div className="h-8 w-px bg-white/5 mx-2" />
@@ -282,12 +282,12 @@ export default function JobDetail() {
           <button 
             onClick={() => setShowTools(!showTools)}
             className={clsx(
-              "p-2.5 rounded-xl transition-all border",
-              showTools ? "bg-suse-pine text-suse-dark border-suse-pine" : "text-gray-400 hover:text-white hover:bg-white/5 border-transparent"
+              "flex items-center gap-2 px-4 py-2 rounded-xl transition-all border font-bold text-xs uppercase tracking-wider",
+              showTools ? "bg-suse-pine text-suse-dark border-suse-pine shadow-[0_0_15px_rgba(48,186,120,0.4)]" : "text-gray-300 hover:text-white hover:bg-white/5 border-white/20"
             )}
             title="Pipeline Controls"
           >
-            <Settings2 size={18} />
+            <Settings2 size={16} /> Controls
           </button>
         </div>
       </div>

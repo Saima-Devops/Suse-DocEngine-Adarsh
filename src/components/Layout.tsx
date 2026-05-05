@@ -35,7 +35,6 @@ export const Layout: React.FC = () => {
   const menuItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'New Pipeline', path: '/new', icon: FilePlus2 },
-    { name: 'Integrations', path: '/settings', icon: GitBranch },
     { name: 'Settings', path: '/settings', icon: SettingsIcon },
   ];
 

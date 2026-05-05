@@ -18,7 +18,7 @@ export default function NewJob() {
   const [subfolder, setSubfolder] = useState('extractions');
   const [customFilename, setCustomFilename] = useState('');
   const [isReviewing, setIsReviewing] = useState(false);
-  const [structuredData, setStructuredData] = useState<{title: string, elements: any[], localPath?: string}>({ title: '', elements: [] });
+  const [structuredData, setStructuredData] = useState<{app: string, source_name: string, sections: any[], localPath?: string}>({ app: '', source_name: '', sections: [] });
   const [draftName, setDraftName] = useState('');
   const [activeMenu, setActiveMenu] = useState<number | null>(null);
   const navigate = useNavigate();
@@ -92,68 +92,76 @@ export default function NewJob() {
     }
   };
 
-  const handleElementEdit = (index: number, newContent: string) => {
-    const newElements = [...structuredData.elements];
-    newElements[index].content = newContent;
-    setStructuredData({ ...structuredData, elements: newElements });
+  const handleElementEdit = (sectionIdx: number, blockIdx: number, newText: string) => {
+    const newSections = JSON.parse(JSON.stringify(structuredData.sections));
+    newSections[sectionIdx].blocks[blockIdx].text = newText;
+    setStructuredData({ ...structuredData, sections: newSections });
   };
 
-  const handleElementTypeChange = (index: number, newType: string) => {
-    const newElements = [...structuredData.elements];
-    newElements[index].type = newType;
-    setStructuredData({ ...structuredData, elements: newElements });
+  const handleSectionHeadingEdit = (sectionIdx: number, newHeading: string) => {
+    const newSections = [...structuredData.sections];
+    newSections[sectionIdx].heading = newHeading;
+    setStructuredData({ ...structuredData, sections: newSections });
   };
 
-  const handleElementDelete = (index: number) => {
-    const newElements = structuredData.elements.filter((_, i) => i !== index);
-    setStructuredData({ ...structuredData, elements: newElements });
+  const handleSectionLevelChange = (sectionIdx: number, newLevel: number) => {
+    const newSections = [...structuredData.sections];
+    newSections[sectionIdx].level = Math.max(1, Math.min(4, newLevel));
+    setStructuredData({ ...structuredData, sections: newSections });
   };
 
-  const handleElementMove = (index: number, direction: 'up' | 'down') => {
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === structuredData.elements.length - 1) return;
-    
-    const newElements = [...structuredData.elements];
-    const targetIdx = direction === 'up' ? index - 1 : index + 1;
-    const temp = newElements[index];
-    newElements[index] = newElements[targetIdx];
-    newElements[targetIdx] = temp;
-    
-    setStructuredData({ ...structuredData, elements: newElements });
+  const handleSectionDelete = (sectionIdx: number) => {
+    const newSections = structuredData.sections.filter((_, i) => i !== sectionIdx);
+    setStructuredData({ ...structuredData, sections: newSections });
   };
 
-  const handleAddElement = () => {
-    setStructuredData({
-      ...structuredData,
-      elements: [...structuredData.elements, { type: 'paragraph', content: '' }]
+  const handleAddSection = (afterIdx: number) => {
+    const newSections = [...structuredData.sections];
+    const newSection = {
+      section_id: Date.now(),
+      order: afterIdx + 1,
+      level: 2,
+      subsection_no: "",
+      section_no: "",
+      heading: "New Section",
+      content: "",
+      blocks: [{ type: 'paragraph', text: '', asset_path: '', caption: '', rows: [] }]
+    };
+    newSections.splice(afterIdx + 1, 0, newSection);
+    setStructuredData({ ...structuredData, sections: newSections });
+  };
+
+  const handleAddBlock = (sectionIdx: number, type: 'paragraph' | 'list-item') => {
+    const newSections = JSON.parse(JSON.stringify(structuredData.sections));
+    newSections[sectionIdx].blocks.push({
+      type,
+      text: '',
+      asset_path: '',
+      caption: '',
+      rows: []
     });
+    setStructuredData({ ...structuredData, sections: newSections });
+  };
+
+  const handleBlockDelete = (sectionIdx: number, blockIdx: number) => {
+    const newSections = JSON.parse(JSON.stringify(structuredData.sections));
+    newSections[sectionIdx].blocks = newSections[sectionIdx].blocks.filter((_: any, i: number) => i !== blockIdx);
+    setStructuredData({ ...structuredData, sections: newSections });
   };
 
   const saveAsDraft = async () => {
     setLoading(true);
     try {
-      // Reconstruct content from edited elements
-      const reconstructedContent = structuredData.elements
-        .map(el => {
-          if (el.type === 'h1') return `<h1>${el.content}</h1>`;
-          if (el.type === 'h2') return `<h2>${el.content}</h2>`;
-          if (el.type === 'h3') return `<h3>${el.content}</h3>`;
-          if (el.type === 'bullet') return `<li>${el.content}</li>`;
-          return `<p>${el.content}</p>`;
-        })
-        .join('\n');
-
       const response = await axios.post('/api/jobs', {
         userId: auth.currentUser?.uid,
-        googleDocTitle: draftName,
-        manualContent: reconstructedContent,
-        metadata: structuredData.elements,
+        googleDocTitle: structuredData.source_name,
+        metadata: structuredData,
         status: 'pending',
         isDraft: true,
         localExtractionPath: structuredData.localPath
       });
 
-      navigate(`/job/${response.data.id}`);
+      navigate(`/setup/${response.data.id}`);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -180,12 +188,10 @@ export default function NewJob() {
 
   if (isReviewing) {
     const stats = {
-      sections: structuredData.elements.filter(e => ['h1', 'h2'].includes(e.type)).length,
-      subsections: structuredData.elements.filter(e => ['h3', 'h4'].includes(e.type)).length,
-      paragraphs: structuredData.elements.filter(e => e.type === 'paragraph').length,
-      tables: structuredData.elements.filter(e => e.type === 'table').length,
-      images: structuredData.elements.filter(e => e.type === 'image').length,
-      words: structuredData.elements.reduce((acc, el) => acc + (el.content.match(/\S+/g) || []).length, 0)
+      sections: structuredData.sections.length,
+      paragraphs: structuredData.sections.reduce((acc, s) => acc + s.blocks.filter((b: any) => b.type === 'paragraph').length, 0),
+      tables: structuredData.sections.reduce((acc, s) => acc + s.blocks.filter((b: any) => b.type === 'table').length, 0),
+      words: structuredData.sections.reduce((acc, s) => acc + s.blocks.reduce((bAcc: any, b: any) => bAcc + (b.text.match(/\S+/g) || []).length, 0), 0)
     };
 
     return (
@@ -198,7 +204,7 @@ export default function NewJob() {
               Extraction Pipeline: Stage 02
             </div>
             <h1 className="text-4xl font-black tracking-tight text-white uppercase">Review & Structure</h1>
-            <p className="text-gray-400 font-medium">Verify detected documentation hierarchies and metadata blocks.</p>
+            <p className="text-gray-400 font-medium">Verify detected documentation hierarchies and metadata blocks for {structuredData.app}.</p>
           </div>
           
           <div className="flex items-center gap-3">
@@ -221,20 +227,12 @@ export default function NewJob() {
 
         {/* Bento Stats & Global Settings */}
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          {/* Left: Stats Bento */}
-          <div className="xl:col-span-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="xl:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-suse-pine/5 border border-suse-pine/20 rounded-2xl p-5 flex flex-col items-center justify-center text-center gap-2 group hover:bg-suse-pine/10 transition-all cursor-default">
               <LayoutList size={24} className="text-suse-pine transition-transform group-hover:scale-110" />
               <div className="flex flex-col">
                 <span className="text-3xl font-black text-white leading-none">{stats.sections}</span>
-                <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Primary Headers</span>
-              </div>
-            </div>
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col items-center justify-center text-center gap-2 group hover:bg-white/10 transition-all cursor-default">
-              <Hash size={24} className="text-gray-500 transition-transform group-hover:scale-110" />
-              <div className="flex flex-col">
-                <span className="text-3xl font-black text-white leading-none">{stats.subsections}</span>
-                <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Subheadings</span>
+                <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Total Sections</span>
               </div>
             </div>
             <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col items-center justify-center text-center gap-2 group hover:bg-white/10 transition-all cursor-default">
@@ -248,7 +246,7 @@ export default function NewJob() {
               <Type size={24} className="text-gray-500 transition-transform group-hover:scale-110" />
               <div className="flex flex-col">
                 <span className="text-3xl font-black text-white leading-none">{stats.words}</span>
-                <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Token Count</span>
+                <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Word Count</span>
               </div>
             </div>
             <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col items-center justify-center text-center gap-2 group hover:bg-white/10 transition-all cursor-default">
@@ -258,29 +256,12 @@ export default function NewJob() {
                 <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Grid Data</span>
               </div>
             </div>
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col items-center justify-center text-center gap-2 group hover:bg-white/10 transition-all cursor-default">
-              <ImageIcon size={24} className="text-gray-500 transition-transform group-hover:scale-110" />
-              <div className="flex flex-col">
-                <span className="text-3xl font-black text-white leading-none">{stats.images}</span>
-                <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-1">Visual Assets</span>
-              </div>
-            </div>
           </div>
 
-          {/* Right: Settings Bento */}
           <div className="bg-suse-jungle/20 border border-suse-pine/20 rounded-2xl p-6 flex flex-col justify-center">
-            <label className="text-[10px] text-suse-pine font-black uppercase tracking-[0.2em] mb-2 px-1">Pipeline Output Name</label>
-            <div className="relative group">
-              <input 
-                type="text" 
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value)}
-                className="w-full bg-suse-dark/80 border border-white/10 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-suse-pine focus:ring-1 focus:ring-suse-pine transition-all placeholder:text-gray-600"
-                placeholder="Enter draft title..."
-              />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600">
-                <Type size={16} />
-              </div>
+            <label className="text-[10px] text-suse-pine font-black uppercase tracking-[0.2em] mb-2 px-1">Source Pipeline</label>
+            <div className="text-white font-bold truncate bg-suse-dark/80 border border-white/10 rounded-xl px-4 py-3 outline-none">
+              {structuredData.source_name}
             </div>
           </div>
         </div>
@@ -290,122 +271,121 @@ export default function NewJob() {
           <div className="bg-white/[0.02] border-b border-white/5 px-8 py-4 flex items-center justify-between">
             <div className="text-xs font-mono text-gray-500 flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-suse-pine" />
-              RAW EXTRACTION BUFFER
+              HIERARCHICAL SECTION DRAFT
             </div>
-            <button
-              onClick={handleAddElement}
-              className="text-xs font-bold text-suse-pine hover:text-suse-neon transition-colors flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-suse-pine/5"
-            >
-              <Plus size={14} />
-              APPEND BLOCK
-            </button>
           </div>
 
-          <div className="p-8 space-y-6 max-h-[1000px] overflow-y-auto custom-scrollbar relative">
-            {structuredData.elements.map((el, idx) => (
-              <div key={idx} className="group relative flex gap-6 pb-6 border-b border-white/5 last:border-0 hover:bg-white/[0.01] -mx-4 px-4 rounded-xl transition-all">
-                {/* Meta Controls */}
-                <div className="w-56 shrink-0 flex items-start gap-3 pt-1">
-                  <div className="flex-1 bg-suse-dark border border-white/10 rounded-xl flex items-center shadow-2xl overflow-hidden">
-                    <select 
-                      value={el.type}
-                      onChange={(e) => handleElementTypeChange(idx, e.target.value)}
-                      className="bg-transparent text-[11px] font-black tracking-widest text-suse-pine p-3 w-full outline-none uppercase appearance-none cursor-pointer"
-                      style={{ colorScheme: 'dark' }}
-                    >
-                      <option value="h1" className="bg-suse-dark text-white">H1 MASTER</option>
-                      <option value="h2" className="bg-suse-dark text-white">H2 HEADING</option>
-                      <option value="h3" className="bg-suse-dark text-white">H3 SUB</option>
-                      <option value="h4" className="bg-suse-dark text-white">H4 SECTION</option>
-                      <option value="paragraph" className="bg-suse-dark text-white">PARAGRAPH</option>
-                      <option value="bullet" className="bg-suse-dark text-white">BULLET LIST</option>
-                    </select>
+          <div className="p-8 space-y-12 max-h-[1000px] overflow-y-auto custom-scrollbar relative bg-[#0b1612]/50">
+            {structuredData.sections.map((section, sIdx) => (
+              <div key={sIdx} className="space-y-6 relative group/section">
+                <div className="flex items-start gap-4">
+                  <div className="flex flex-col items-center gap-1 w-12 pt-1 font-mono text-[10px] group-hover/section:text-suse-pine transition-colors">
+                    <span className={clsx("font-black", section.section_no ? "text-suse-pine" : "text-gray-600")}>{section.section_no || 'DRAFT'}</span>
+                    <div className="w-px h-8 bg-suse-pine/20" />
+                    
+                    <div className="hidden group-hover/section:flex flex-col gap-1 mt-2 transition-all">
+                       <button onClick={() => handleSectionDelete(sIdx)} className="p-2 text-red-500 hover:bg-red-500/20 rounded-xl transition-all shadow-lg border border-red-500/10 hover:border-red-500/30 bg-suse-dark/50" title="Delete Section">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                   
-                  <div className="relative flex flex-col items-center">
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveMenu(activeMenu === idx ? null : idx);
-                      }}
-                      className="p-2 text-gray-500 hover:text-white transition-colors hover:bg-white/5 rounded-xl border border-transparent hover:border-white/10"
-                    >
-                      <MoreVertical size={18} />
-                    </button>
-                    {activeMenu === idx && (
-                      <div 
-                        className="absolute right-full top-0 mr-3 flex flex-row gap-1 bg-suse-jungle border border-suse-pine/30 rounded-xl p-1.5 shadow-2xl z-50 min-w-max backdrop-blur-xl ring-1 ring-white/10"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button 
-                          onClick={() => handleElementMove(idx, 'up')}
-                          disabled={idx === 0}
-                          className="p-2.5 rounded-lg text-gray-400 hover:bg-white/10 hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent"
-                          title="Shift Higher"
-                        >
-                          <ArrowUp size={18} />
-                        </button>
-                        <button 
-                          onClick={() => handleElementMove(idx, 'down')}
-                          disabled={idx === structuredData.elements.length - 1}
-                          className="p-2.5 rounded-lg text-gray-400 hover:bg-white/10 hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent"
-                          title="Shift Lower"
-                        >
-                          <ArrowDown size={18} />
-                        </button>
-                        <div className="w-px h-6 bg-white/10 mx-1 self-center" />
-                        <button 
-                          onClick={() => handleElementDelete(idx)}
-                          className="p-2.5 rounded-lg text-red-500 hover:bg-red-500/20 hover:text-red-400 transition-all"
-                          title="Prune Block"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-4">
+                      <div className="flex p-1 bg-suse-dark/80 border border-white/20 rounded-xl shadow-2xl">
+                        {[1, 2, 3].map(lvl => (
+                          <button
+                            key={lvl}
+                            onClick={() => handleSectionLevelChange(sIdx, lvl)}
+                            className={clsx(
+                              "px-4 py-2 text-[10px] font-black uppercase tracking-[0.15em] rounded-lg transition-all",
+                              section.level === lvl ? "bg-suse-pine text-white shadow-[0_0_15px_rgba(48,186,120,0.4)]" : "text-gray-500 hover:text-gray-300 hover:bg-white/5"
+                            )}
+                          >
+                            H{lvl}
+                          </button>
+                        ))}
                       </div>
-                    )}
+                      
+                      <input
+                        className={clsx(
+                          "flex-1 bg-transparent border-l-4 border-suse-pine/30 focus:border-suse-pine focus:outline-none transition-all pl-6 py-2 font-black uppercase tracking-tight",
+                          section.level === 1 ? "text-4xl text-white" : 
+                          section.level === 2 ? "text-2xl text-gray-100" : 
+                          "text-xl text-gray-300"
+                        )}
+                        value={section.heading}
+                        onChange={(e) => handleSectionHeadingEdit(sIdx, e.target.value)}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* Content Editor Area */}
-                <div className="flex-1 min-w-0">
-                  {el.type.startsWith('h') ? (
-                    <input
-                      className={clsx(
-                        "w-full bg-transparent border-l-2 border-transparent focus:border-suse-pine focus:outline-none transition-all pl-4 py-1 font-sans",
-                        el.type === 'h1' ? "text-4xl font-black text-white tracking-tight uppercase" : 
-                        el.type === 'h2' ? "text-3xl font-extrabold text-gray-100" : 
-                        el.type === 'h3' ? "text-2xl font-bold text-gray-200" :
-                        "text-xl font-semibold text-gray-300"
+                <div className="space-y-4 ml-16">
+                  {section.blocks.map((block: any, bIdx: number) => (
+                    <div key={bIdx} className="group/block relative">
+                      {block.type === 'table' ? (
+                        <div className="bg-white/5 border border-white/10 rounded-xl p-4 overflow-x-auto">
+                          <table className="w-full text-xs text-left border-collapse">
+                            <tbody>
+                              {block.rows.map((row: string[], rIdx: number) => (
+                                <tr key={rIdx} className="border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors">
+                                  {row.map((cell, cIdx) => (
+                                    <td key={cIdx} className="p-2 text-gray-400 font-mono">{cell}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <textarea
+                            rows={Math.max(2, Math.ceil((block.text || '').length / 120))}
+                            className={clsx(
+                              "w-full bg-white/[0.02] border border-transparent hover:border-white/5 focus:border-suse-pine/30 focus:outline-none focus:bg-suse-dark/30 rounded-2xl px-6 py-4 transition-all resize-none leading-relaxed font-medium text-lg",
+                              block.type === 'list-item' ? "italic list-item ml-6 text-suse-pine/90" : "text-gray-300"
+                            )}
+                            value={block.text}
+                            onChange={(e) => handleElementEdit(sIdx, bIdx, e.target.value)}
+                          />
+                          <button 
+                            onClick={() => handleBlockDelete(sIdx, bIdx)}
+                            className="absolute -right-2 top-0 opacity-0 group-hover/block:opacity-100 p-2 text-red-500/50 hover:text-red-400 transition-all"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       )}
-                      value={el.content}
-                      onChange={(e) => handleElementEdit(idx, e.target.value)}
-                    />
-                  ) : (
-                    <textarea
-                      rows={Math.max(2, Math.ceil(el.content.length / 120))}
-                      className={clsx(
-                        "w-full bg-white/[0.02] border border-transparent hover:border-white/5 focus:border-suse-pine/30 focus:outline-none focus:bg-suse-dark/30 rounded-2xl px-6 py-4 transition-all resize-none leading-relaxed font-medium text-lg",
-                        el.type === 'bullet' ? "italic list-item ml-10 text-suse-pine/90" : "text-gray-300"
-                      )}
-                      value={el.content}
-                      onChange={(e) => handleElementEdit(idx, e.target.value)}
-                    />
-                  )}
+                    </div>
+                  ))}
+                  
+                  <div className="flex items-center gap-4 pt-4 opacity-0 group-hover/section:opacity-100 transition-all">
+                    <button 
+                      onClick={() => handleAddBlock(sIdx, 'paragraph')}
+                      className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-suse-pine/60 hover:text-suse-pine transition-all px-4 py-2.5 rounded-xl border border-dashed border-suse-pine/20 hover:border-suse-pine/50 hover:bg-suse-pine/5"
+                    >
+                      <Plus size={14} /> Add Paragraph
+                    </button>
+                    <button 
+                      onClick={() => handleAddBlock(sIdx, 'list-item')}
+                      className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-suse-pine/60 hover:text-suse-pine transition-all px-4 py-2.5 rounded-xl border border-dashed border-suse-pine/20 hover:border-suse-pine/50 hover:bg-suse-pine/5"
+                    >
+                      <Plus size={14} /> Add List Item
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative h-px bg-white/5 my-12 group/divider">
+                  <button 
+                    onClick={() => handleAddSection(sIdx)}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/divider:opacity-100 bg-suse-dark border border-suse-pine/40 text-suse-pine px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all hover:scale-110 hover:border-suse-pine hover:shadow-[0_0_20px_rgba(48,186,120,0.3)] z-10 flex items-center gap-2"
+                  >
+                    <Plus size={14} /> Inject New Section
+                  </button>
                 </div>
               </div>
             ))}
-            
-            <div className="flex justify-center pt-8">
-              <button
-                onClick={handleAddElement}
-                className="group flex flex-col items-center gap-3 text-gray-500 hover:text-suse-pine transition-all"
-              >
-                <div className="p-4 rounded-full border border-dashed border-gray-700 group-hover:border-suse-pine group-hover:bg-suse-pine/5 transition-all">
-                  <Plus size={32} />
-                </div>
-                <span className="text-[10px] font-black uppercase tracking-[0.3em]">Integrate New Data Node</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>

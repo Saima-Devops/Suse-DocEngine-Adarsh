@@ -6,15 +6,28 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
   /* SUSE Brand Colors */
-  --color-suse-pine: #30BA78;
-  --color-suse-jungle: #173238;
+  --color-suse-pine: var(--theme-pine);
+  --color-suse-jungle: var(--theme-jungle);
   --color-suse-water: #00A3CC;
-  --color-suse-dark: #0c1c20;
+  --color-suse-dark: var(--theme-dark);
 }
 
 @layer base {
+  :root {
+    --theme-pine: #30BA78;
+    --theme-jungle: #173238;
+    --theme-dark: #0c1c20;
+    --theme-text: #f3f4f6;
+  }
+  .light-green {
+    --theme-pine: #1b8a53;
+    --theme-jungle: #eaf5f0;
+    --theme-dark: #f0f8f5;
+    --theme-text: #1f2937;
+  }
+  
   body {
-    @apply bg-suse-dark text-gray-100 font-sans antialiased;
+    @apply bg-suse-dark text-[var(--theme-text)] font-sans antialiased;
   }
 }
 

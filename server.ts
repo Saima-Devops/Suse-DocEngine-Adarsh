@@ -144,16 +144,92 @@ async function startServer() {
     res.json(newJob);
   });
 
+  app.post("/api/setup-project/:id", (req, res) => {
+    const {
+      suseProduct,
+      partnerName,
+      partnerProduct,
+      documentType // e.g. 'reference-configuration', 'trd'
+    } = req.body;
+
+    const jobs = getLocalJobs();
+    const idx = jobs.findIndex((j: any) => j.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "Job not found" });
+
+    try {
+      let safeDocType = (documentType || "document").toLowerCase().replace(/[^a-z0-9\-]/g, '-');
+      if (safeDocType === 'reference-configuration') safeDocType = 'reference';
+      const safePartner = (partnerName || "partner").toLowerCase().replace(/[^a-z0-9\-]/g, '-');
+      
+      const projectDir = path.join(process.cwd(), safeDocType, safePartner);
+      if (!fs.existsSync(projectDir)) {
+        fs.mkdirSync(projectDir, { recursive: true });
+      }
+
+      const adocPath = path.join(projectDir, "main.adoc");
+      if (!fs.existsSync(adocPath)) {
+        fs.writeFileSync(adocPath, `= ${partnerName || "Partner"} integration with ${suseProduct || "SUSE Product"}\n\n// Content will be generated here\n`);
+      }
+
+      const dcPath = path.join(projectDir, "dc.xml");
+      if (!fs.existsSync(dcPath)) {
+        fs.writeFileSync(dcPath, `<?xml version="1.0" encoding="UTF-8"?>\n<metadata>\n  <suse-product>${suseProduct}</suse-product>\n  <partner-name>${partnerName}</partner-name>\n  <partner-product>${partnerProduct}</partner-product>\n  <type>${documentType}</type>\n</metadata>\n`);
+      }
+
+      let appliedMetadata = jobs[idx].metadata;
+      if (req.body.localExtractionPath) {
+        try {
+          const jsonPath = path.join(DATA_DIR, req.body.localExtractionPath);
+          if (fs.existsSync(jsonPath)) {
+            const rawContent = fs.readFileSync(jsonPath, "utf8");
+            appliedMetadata = JSON.parse(rawContent);
+          }
+        } catch (e) {
+          console.error("Failed to parse selected JSON extraction draft", e);
+        }
+      }
+
+      // Update the job with project info and output path
+      jobs[idx] = {
+        ...jobs[idx],
+        projectSetup: req.body,
+        localExtractionPath: req.body.localExtractionPath, // Save it here
+        metadata: appliedMetadata,
+        outputFolderPath: path.join(safeDocType, safePartner),
+        asciiDocPath: path.join(safeDocType, safePartner, "main.adoc"),
+        updatedAt: new Date().toISOString()
+      };
+      saveLocalJobs(jobs);
+
+      res.json(jobs[idx]);
+    } catch (e: any) {
+      console.error("Project setup error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.patch("/api/jobs/:id", (req, res) => {
     const jobs = getLocalJobs();
     const idx = jobs.findIndex((j: any) => j.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: "Job not found" });
 
-    jobs[idx] = {
+    const updatedJob = {
       ...jobs[idx],
       ...req.body,
       updatedAt: new Date().toISOString(),
     };
+    
+    // Auto-save asciidoc to local fs if path is configured
+    if (updatedJob.asciiDocPath && req.body.asciiDocContent) {
+      try {
+        const fullPath = path.join(process.cwd(), updatedJob.asciiDocPath);
+        fs.writeFileSync(fullPath, req.body.asciiDocContent);
+      } catch (e) {
+        console.error("Failed to write to ascii doc path:", e);
+      }
+    }
+
+    jobs[idx] = updatedJob;
     saveLocalJobs(jobs);
     res.json(jobs[idx]);
   });
@@ -208,33 +284,96 @@ async function startServer() {
         const html = result.value;
         const $ = cheerio.load(html);
         
-        const elements: any[] = [];
+        const sections: any[] = [];
+        let currentSection: any = null;
+        let sectionCounter = 0;
+        let orderCounter = 0;
         
         $('body').children().each((i, el) => {
           const tagName = (el as any).tagName.toLowerCase();
           const text = $(el).text().trim();
           
-          if (!text) return;
+          if (!text && tagName !== 'table') return;
           
-          let type = "paragraph";
-          if (tagName === "h1") type = "h1";
-          else if (tagName === "h2") type = "h2";
-          else if (tagName === "h3") type = "h3";
-          else if (tagName === "h4" || tagName === "h5" || tagName === "h6") type = "h4";
-          else if (tagName === "ul" || tagName === "ol") {
-            $(el).find('li').each((_, li) => {
-              const liText = $(li).text().trim();
-              if (liText) elements.push({ type: "bullet", content: liText });
-            });
-            return;
+          const isHeading = tagName.startsWith('h') && tagName.length === 2;
+          const hLevel = isHeading ? parseInt(tagName.substring(1)) : 0;
+          
+          if (isHeading) {
+            sectionCounter++;
+            orderCounter++;
+            currentSection = {
+              section_id: sectionCounter,
+              order: orderCounter,
+              level: hLevel,
+              subsection_no: sectionCounter.toString(),
+              section_no: sectionCounter.toString(),
+              heading: text,
+              content: text,
+              blocks: []
+            };
+            sections.push(currentSection);
+          } else {
+            if (!currentSection) {
+              sectionCounter++;
+              orderCounter++;
+              currentSection = {
+                section_id: sectionCounter,
+                order: orderCounter,
+                level: 1,
+                subsection_no: sectionCounter.toString(),
+                section_no: sectionCounter.toString(),
+                heading: "Introduction",
+                content: "",
+                blocks: []
+              };
+              sections.push(currentSection);
+            }
+
+            if (tagName === 'table') {
+              const rows: any[] = [];
+              $(el).find('tr').each((_, tr) => {
+                const cells: string[] = [];
+                $(tr).find('td, th').each((_, td) => {
+                  cells.push($(td).text().trim());
+                });
+                rows.push(cells);
+              });
+
+              currentSection.blocks.push({
+                type: "table",
+                text: "",
+                asset_path: "",
+                caption: "Table Data",
+                rows: rows
+              });
+            } else if (tagName === 'ul' || tagName === 'ol') {
+               $(el).find('li').each((_, li) => {
+                currentSection.blocks.push({
+                  type: "list-item",
+                  text: $(li).text().trim(),
+                  asset_path: "",
+                  caption: "",
+                  rows: []
+                });
+              });
+            } else {
+              currentSection.blocks.push({
+                type: "paragraph",
+                text: text,
+                asset_path: "",
+                caption: "",
+                rows: []
+              });
+              currentSection.content = (currentSection.content + "\n" + text).trim();
+            }
           }
-          
-          elements.push({ type, content: text });
         });
         
         const extractedData = {
-            title: req.file.originalname.replace(".docx", ""),
-            elements: elements
+            app: "SUSE TRD - RC Reference Configurator",
+            source_name: req.file.originalname,
+            created_at: new Date().toISOString(),
+            sections: sections
         };
         
         const subfolder = req.body.subfolder;
@@ -350,6 +489,8 @@ async function startServer() {
 
   app.post("/api/transform", async (req, res) => {
     const { docId, accessToken, manualContent, metadata } = req.body;
+    console.log("Transform request body keys:", Object.keys(req.body));
+    console.log("Transform docId:", docId, "metadata defined:", !!metadata);
 
     try {
       let contentToTransform = manualContent;
@@ -359,21 +500,48 @@ async function startServer() {
       let adoc = "";
 
       // If we have strict structured metadata from the UI!
-      if (metadata && Array.isArray(metadata)) {
+      if (metadata) {
         console.log("Using structured metadata for AsciiDoc conversion...");
-        const blocks = metadata.map(el => {
-          if (el.type === 'h1') return `= ${el.content}`;
-          if (el.type === 'h2') return `== ${el.content}`;
-          if (el.type === 'h3') return `=== ${el.content}`;
-          if (el.type === 'h4') return `==== ${el.content}`;
-          if (el.type === 'bullet') return `* ${el.content}`;
-          return el.content;
-        });
-        adoc = blocks.filter(Boolean).join('\n\n');
-        // Extract title from the first h1 if it exists
-        const firstH1 = metadata.find(m => m.type === 'h1');
-        if (firstH1) {
-          title = firstH1.content;
+        
+        if (Array.isArray(metadata)) {
+          const blocks = metadata.map(el => {
+            if (el.type === 'h1') return `= ${el.content}`;
+            if (el.type === 'h2') return `== ${el.content}`;
+            if (el.type === 'h3') return `=== ${el.content}`;
+            if (el.type === 'h4') return `==== ${el.content}`;
+            if (el.type === 'bullet') return `* ${el.content}`;
+            return el.content;
+          });
+          adoc = blocks.filter(Boolean).join('\n\n');
+          // Extract title from the first h1 if it exists
+          const firstH1 = metadata.find(m => m.type === 'h1');
+          if (firstH1) {
+            title = firstH1.content;
+          }
+        } else if (metadata.sections) {
+          const lines: string[] = [];
+          metadata.sections.forEach((section: any) => {
+            const prefix = "=".repeat(section.level || 1);
+            lines.push(`${prefix} ${section.heading}`);
+            lines.push("");
+            
+            section.blocks.forEach((block: any) => {
+              if (block.type === 'paragraph') {
+                lines.push(block.text);
+              } else if (block.type === 'list-item') {
+                lines.push(`* ${block.text}`);
+              } else if (block.type === 'table') {
+                lines.push("|===");
+                block.rows.forEach((row: string[]) => {
+                  lines.push(`| ${row.join(' | ')}`);
+                });
+                lines.push("|===");
+              }
+              lines.push("");
+            });
+          });
+          adoc = lines.join("\n");
+          title = metadata.app || metadata.source_name || "Document";
         }
       } else {
         if (!contentToTransform) {

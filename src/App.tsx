@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import NewJob from './pages/NewJob';
 import JobDetail from './pages/JobDetail';
+import ProjectSetup from './pages/ProjectSetup';
 import Settings from './pages/Settings';
 import { Layout } from './components/Layout';
 
@@ -14,6 +15,10 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Initialize theme based on user settings
+    const theme = localStorage.getItem('theme') || 'dark-green';
+    document.documentElement.className = theme;
+    
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -36,6 +41,7 @@ export default function App() {
         <Route element={user ? <Layout /> : <Navigate to="/login" />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/new" element={<NewJob />} />
+          <Route path="/setup/:id" element={<ProjectSetup />} />
           <Route path="/job/:id" element={<JobDetail />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
